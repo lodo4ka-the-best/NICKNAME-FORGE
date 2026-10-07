@@ -4,6 +4,7 @@ from typing import Optional
 
 try:
     import requests
+
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
@@ -14,10 +15,11 @@ def check(nickname: str) -> Optional[bool]:
     if not HAS_REQUESTS:
         return None
     try:
-        r = requests.get(
+        r = requests.post(
             "https://users.roblox.com/v1/usernames/users",
             json={"usernames": [nickname], "excludeBannedUsers": False},
             timeout=5,
+            headers={"Content-Type": "application/json"},
         )
         if r.status_code == 200:
             data = r.json()
