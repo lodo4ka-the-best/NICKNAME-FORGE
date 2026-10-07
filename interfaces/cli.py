@@ -101,14 +101,24 @@ class CLI:
         return None
 
     def generate(self, count: int) -> List[Result]:
-        """Генерирует `count` хороших ников."""
-        results = []
-        used = set()
+    """
+    Генерирует `count` хороших ников.
 
-        for _ in range(count * 10):  # максимум попыток
-            if len(results) >= count:
-                break
-            r = self.generate_one()
+    Если при текущем пороге не удаётся набрать нужное количество —
+    постепенно снижаем порог (adaptive threshold).
+    """
+    results = []
+    used = set()
+    current_threshold = self.profile.quality_threshold
+
+    # Пробуем с шагом снижения порога
+    for attempt_round in range(5):
+        attempts = 0
+        max_attempts = count * 20
+
+        while len(results) < count and attempts < max_attempts:
+            attempts += 1
+            r = self._generate_one_with_threshold(current_threshold)
             if r is None:
                 continue
             if r.name.lower() in used:
@@ -116,8 +126,60 @@ class CLI:
             used.add(r.name.lower())
             results.append(r)
 
-        results.sort(key=lambda r: -r.score)
-        return results
+        if len(results) >= count:
+            break
+
+        # Снижаем порог на 10%
+        current_threshold *= 0.9
+        if current_threshold < 0.4:
+            break
+
+    results.sort(key=lambda r: -r.score)
+    return results
+
+
+def _generate_one_with_threshold(self, threshold: float) -> Optional[Result]:
+    """
+    Генерирует один ник с указанным порогом.
+    Вспомогательный метод для adaptive threshold.
+    """
+    best = None
+
+    for _ in range(self.profile.max_retries):
+        name = self.generator.generate_one(
+            temperature=self.profile.temperature,
+            max_len=self.profile.max_len + 2,
+        )
+        if not name:
+            continue
+
+        if not self._is_valid(name):
+            continue
+
+        logp = self.generator.model.log_prob(name)
+        scored = score(name, log_prob=logp, corpus=self.corpus)
+
+        if best is None or scored["score"] > best.score:
+            best = Result(
+                name=name,
+                score=scored["score"],
+                naturalness=scored["naturalness"],
+                pronounceability=scored["pronounceability"],
+                balance=scored["balance"],
+            )
+
+        if scored["score"] >= threshold:
+            return Result(
+                name=name,
+                score=scored["score"],
+                naturalness=scored["naturalness"],
+                pronounceability=scored["pronounceability"],
+                balance=scored["balance"],
+            )
+
+    if best and best.score >= threshold * 0.8:
+        return best
+    return None
 
 
 def run_cli():
